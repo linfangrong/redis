@@ -191,6 +191,28 @@ struct redisCommand redisCommandTable[] = {
     {"zrank",zrankCommand,3,"rF",0,NULL,1,1,1,0,0},
     {"zrevrank",zrevrankCommand,3,"rF",0,NULL,1,1,1,0,0},
     {"zscan",zscanCommand,-3,"rR",0,NULL,1,1,1,0,0},
+    {"xadd", xaddCommand, -4, "wmF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xincrby", xincrbyCommand, -4, "wmF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrem", xremCommand, -3, "wF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrange", xrangeCommand, -4, "r", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrevrange", xrevrangeCommand, -4, "r", 0, NULL, 1, 1, 1, 0, 0},
+    {"xcard", xcardCommand, 2, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xscore", xscoreCommand, 3, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xsetoptions", xsetoptionsCommand, -4, "w", 0, NULL, 1, 1, 1, 0, 0},
+    {"xgetfinity", xgetfinityCommand, 2, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xgetpruning", xgetpruningCommand, 2, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrangebyscore", xrangebyscoreCommand, -4, "r", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrevrangebyscore", xrevrangebyscoreCommand, -4, "r", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrangebylex", xrangebylexCommand, -4, "r", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrevrangebylex", xrevrangebylexCommand, -4, "r", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrank", xrankCommand, 3, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xrevrank", xrevrankCommand, 3, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xcount", xcountCommand, 4, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xlexcount", xlexcountCommand, 4, "rF", 0, NULL, 1, 1, 1, 0, 0},
+    {"xremrangebyscore", xremrangebyscoreCommand, 4, "w", 0, NULL, 1, 1, 1, 0, 0},
+    {"xremrangebyrank", xremrangebyrankCommand, 4, "w", 0, NULL, 1, 1, 1, 0, 0},
+    {"xremrangebylex", xremrangebylexCommand, 4, "w", 0, NULL, 1, 1, 1, 0, 0},
+    {"xscan", xscanCommand, -3, "rR", 0, NULL, 1, 1, 1, 0, 0},
     {"hset",hsetCommand,4,"wmF",0,NULL,1,1,1,0,0},
     {"hsetnx",hsetnxCommand,4,"wmF",0,NULL,1,1,1,0,0},
     {"hget",hgetCommand,3,"rF",0,NULL,1,1,1,0,0},
@@ -261,7 +283,7 @@ struct redisCommand redisCommandTable[] = {
     {"cluster",clusterCommand,-2,"ar",0,NULL,0,0,0,0,0},
     {"restore",restoreCommand,-4,"wm",0,NULL,1,1,1,0,0},
     {"restore-asking",restoreCommand,-4,"wmk",0,NULL,1,1,1,0,0},
-    {"migrate",migrateCommand,-6,"w",0,NULL,3,3,1,0,0},
+    {"migrate",migrateCommand,-6,"w",0,NULL,0,0,0,0,0},
     {"asking",askingCommand,1,"r",0,NULL,0,0,0,0,0},
     {"readonly",readonlyCommand,1,"rF",0,NULL,0,0,0,0,0},
     {"readwrite",readwriteCommand,1,"rF",0,NULL,0,0,0,0,0},
@@ -1468,6 +1490,10 @@ void initServerConfig(void) {
     server.set_max_intset_entries = REDIS_SET_MAX_INTSET_ENTRIES;
     server.zset_max_ziplist_entries = REDIS_ZSET_MAX_ZIPLIST_ENTRIES;
     server.zset_max_ziplist_value = REDIS_ZSET_MAX_ZIPLIST_VALUE;
+    server.xset_max_ziplist_entries = REDIS_XSET_MAX_ZIPLIST_ENTRIES;
+    server.xset_max_ziplist_value = REDIS_XSET_MAX_ZIPLIST_VALUE;
+    server.xset_finity = REDIS_DEFAULT_XSET_FINITY;
+    server.xset_pruning = REDIS_DEFAULT_XSET_PRUNING;
     server.hll_sparse_max_bytes = REDIS_DEFAULT_HLL_SPARSE_MAX_BYTES;
     server.shutdown_asap = 0;
     server.repl_ping_slave_period = REDIS_REPL_PING_SLAVE_PERIOD;
@@ -2259,7 +2285,7 @@ int processCommand(redisClient *c) {
         c->cmd->proc != unsubscribeCommand &&
         c->cmd->proc != psubscribeCommand &&
         c->cmd->proc != punsubscribeCommand) {
-        addReplyError(c,"only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT allowed in this context");
+        addReplyError(c,"only (P)SUBSCRIBE / (P)UNSUBSCRIBE / QUIT allowed in this context");
         return REDIS_OK;
     }
 

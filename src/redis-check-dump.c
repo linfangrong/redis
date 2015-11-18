@@ -48,11 +48,13 @@
 #define REDIS_SET 2
 #define REDIS_ZSET 3
 #define REDIS_HASH 4
+#define REDIS_XSET 5
 #define REDIS_HASH_ZIPMAP 9
 #define REDIS_LIST_ZIPLIST 10
 #define REDIS_SET_INTSET 11
 #define REDIS_ZSET_ZIPLIST 12
 #define REDIS_HASH_ZIPLIST 13
+#define REDIS_XSET_ZIPLIST 14
 
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
@@ -148,8 +150,8 @@ int checkType(unsigned char t) {
     /* In case a new object type is added, update the following
      * condition as necessary. */
     return
-        (t >= REDIS_HASH_ZIPMAP && t <= REDIS_HASH_ZIPLIST) ||
-        t <= REDIS_HASH ||
+        (t >= REDIS_HASH_ZIPMAP && t <= REDIS_XSET_ZIPLIST) ||
+        t <= REDIS_XSET ||
         t >= REDIS_EXPIRETIME_MS;
 }
 
@@ -427,6 +429,27 @@ int loadPair(entry *e) {
         }
     }
 
+    uint32_t finity = 0, pruning = 0;
+    if (e->type == REDIS_XSET ||
+        e->type == REDIS_XSET_ZIPLIST) {
+        if ((finity = loadLength(NULL)) == REDIS_RDB_LENERR) {
+            SHIFT_ERROR(offset, "Error reading %s finity", types[e->type]);
+            return 0;
+        }
+        offset = CURR_OFFSET;
+        if ((pruning = loadLength(NULL)) == REDIS_RDB_LENERR) {
+            SHIFT_ERROR(offset, "Error reading %s pruning", types[e->type]);
+            return 0;
+        }
+        if (e->type == REDIS_XSET) {
+            offset = CURR_OFFSET;
+            if ((length = loadLength(NULL)) == REDIS_RDB_LENERR) {
+                SHIFT_ERROR(offset, "Error reading %s length", types[e->type]);
+                return 0;
+            }
+        }
+    }
+
     switch(e->type) {
     case REDIS_STRING:
     case REDIS_HASH_ZIPMAP:
@@ -434,6 +457,7 @@ int loadPair(entry *e) {
     case REDIS_SET_INTSET:
     case REDIS_ZSET_ZIPLIST:
     case REDIS_HASH_ZIPLIST:
+    case REDIS_XSET_ZIPLIST:
         if (!processStringObject(NULL)) {
             SHIFT_ERROR(offset, "Error reading entry value");
             return 0;
@@ -450,6 +474,7 @@ int loadPair(entry *e) {
         }
     break;
     case REDIS_ZSET:
+    case REDIS_XSET:
         for (i = 0; i < length; i++) {
             offset = CURR_OFFSET;
             if (!processStringObject(NULL)) {
@@ -751,6 +776,7 @@ int main(int argc, char **argv) {
     sprintf(types[REDIS_SET], "SET");
     sprintf(types[REDIS_ZSET], "ZSET");
     sprintf(types[REDIS_HASH], "HASH");
+    sprintf(types[REDIS_XSET], "XSET");
 
     /* Object types only used for dumping to disk */
     sprintf(types[REDIS_EXPIRETIME], "EXPIRETIME");

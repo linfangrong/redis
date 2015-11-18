@@ -239,6 +239,61 @@ void computeDatasetDigest(unsigned char *final) {
                     xorDigest(digest,eledigest,20);
                 }
                 hashTypeReleaseIterator(hi);
+            } else if (o->type == REDIS_XSET) {
+                unsigned char eledigest[20];
+
+                if (o->encoding == REDIS_ENCODING_ZIPLIST) {
+                    xsetZiplist *xsz = o->ptr;
+                    unsigned char *zl = xsz->zl;
+                    unsigned char *eptr, *sptr;
+                    unsigned char *vstr;
+                    unsigned int vlen;
+                    long long vll;
+                    double score;
+
+                    eptr = ziplistIndex(zl, 0);
+                    redisAssert(eptr != NULL);
+                    sptr = ziplistNext(zl, eptr);
+                    redisAssert(sptr != NULL);
+
+                    while (eptr != NULL) {
+                        redisAssert(ziplistGet(eptr, &vstr, &vlen, &vll));
+                        score = zzlGetScore(sptr);
+
+                        memset(eledigest, 0, 20);
+                        if (vstr != NULL) {
+                            mixDigest(eledigest, vstr, vlen);
+                        } else {
+                            ll2string(buf, sizeof(buf), vll);
+                            mixDigest(eledigest, buf, strlen(buf));
+                        }
+
+                        snprintf(buf, sizeof(buf), "%.17g", score);
+                        mixDigest(eledigest, buf, strlen(buf));
+                        xorDigest(digest, eledigest, 20);
+                        zzlNext(zl, &eptr, &sptr);
+                    }
+                } else if (o->encoding == REDIS_ENCODING_SKIPLIST) {
+                    xset *xs = o->ptr;
+                    zset *zs = xs->zset;
+                    dictIterator *di = dictGetIterator(zs->dict);
+                    dictEntry *de;
+
+                    while ((de = dictNext(di)) != NULL) {
+                        robj *eleobj = dictGetKey(de);
+                        double *score = dictGetVal(de);
+
+                        snprintf(buf, sizeof(buf), "%.17g", *score);
+                        memset(eledigest, 0, 20);
+                        mixObjectDigest(eledigest, eleobj);
+                        mixDigest(eledigest, buf, strlen(buf));
+                        xorDigest(digest, eledigest, 20);
+                    }
+                    dictReleaseIterator(di);
+                } else {
+                    redisPanic("Unknown finite sorted set encoding");
+                }
+
             } else {
                 redisPanic("Unknown object type");
             }

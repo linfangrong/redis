@@ -51,9 +51,7 @@
 
 #include "redis.h"
 #include <math.h>
-
-static int zslLexValueGteMin(robj *value, zlexrangespec *spec);
-static int zslLexValueLteMax(robj *value, zlexrangespec *spec);
+#include "t_zset.h"
 
 zskiplistNode *zslCreateNode(int level, double score, robj *obj) {
     zskiplistNode *zn = zmalloc(sizeof(*zn)+level*sizeof(struct zskiplistLevel));
@@ -207,14 +205,6 @@ int zslDelete(zskiplist *zsl, double score, robj *obj) {
         return 1;
     }
     return 0; /* not found */
-}
-
-static int zslValueGteMin(double value, zrangespec *spec) {
-    return spec->minex ? (value > spec->min) : (value >= spec->min);
-}
-
-static int zslValueLteMax(double value, zrangespec *spec) {
-    return spec->maxex ? (value < spec->max) : (value <= spec->max);
 }
 
 /* Returns if there is a part of the zset is in range. */
@@ -426,43 +416,6 @@ zskiplistNode* zslGetElementByRank(zskiplist *zsl, unsigned long rank) {
     return NULL;
 }
 
-/* Populate the rangespec according to the objects min and max. */
-static int zslParseRange(robj *min, robj *max, zrangespec *spec) {
-    char *eptr;
-    spec->minex = spec->maxex = 0;
-
-    /* Parse the min-max interval. If one of the values is prefixed
-     * by the "(" character, it's considered "open". For instance
-     * ZRANGEBYSCORE zset (1.5 (2.5 will match min < x < max
-     * ZRANGEBYSCORE zset 1.5 2.5 will instead match min <= x <= max */
-    if (min->encoding == REDIS_ENCODING_INT) {
-        spec->min = (long)min->ptr;
-    } else {
-        if (((char*)min->ptr)[0] == '(') {
-            spec->min = strtod((char*)min->ptr+1,&eptr);
-            if (eptr[0] != '\0' || isnan(spec->min)) return REDIS_ERR;
-            spec->minex = 1;
-        } else {
-            spec->min = strtod((char*)min->ptr,&eptr);
-            if (eptr[0] != '\0' || isnan(spec->min)) return REDIS_ERR;
-        }
-    }
-    if (max->encoding == REDIS_ENCODING_INT) {
-        spec->max = (long)max->ptr;
-    } else {
-        if (((char*)max->ptr)[0] == '(') {
-            spec->max = strtod((char*)max->ptr+1,&eptr);
-            if (eptr[0] != '\0' || isnan(spec->max)) return REDIS_ERR;
-            spec->maxex = 1;
-        } else {
-            spec->max = strtod((char*)max->ptr,&eptr);
-            if (eptr[0] != '\0' || isnan(spec->max)) return REDIS_ERR;
-        }
-    }
-
-    return REDIS_OK;
-}
-
 /* ------------------------ Lexicographic ranges ---------------------------- */
 
 /* Parse max or min argument of ZRANGEBYLEX.
@@ -507,28 +460,6 @@ int zslParseLexRangeItem(robj *item, robj **dest, int *ex) {
     }
 }
 
-/* Populate the rangespec according to the objects min and max.
- *
- * Return REDIS_OK on success. On error REDIS_ERR is returned.
- * When OK is returned the structure must be freed with zslFreeLexRange(),
- * otherwise no release is needed. */
-static int zslParseLexRange(robj *min, robj *max, zlexrangespec *spec) {
-    /* The range can't be valid if objects are integer encoded.
-     * Every item must start with ( or [. */
-    if (min->encoding == REDIS_ENCODING_INT ||
-        max->encoding == REDIS_ENCODING_INT) return REDIS_ERR;
-
-    spec->min = spec->max = NULL;
-    if (zslParseLexRangeItem(min, &spec->min, &spec->minex) == REDIS_ERR ||
-        zslParseLexRangeItem(max, &spec->max, &spec->maxex) == REDIS_ERR) {
-        if (spec->min) decrRefCount(spec->min);
-        if (spec->max) decrRefCount(spec->max);
-        return REDIS_ERR;
-    } else {
-        return REDIS_OK;
-    }
-}
-
 /* Free a lex range structure, must be called only after zelParseLexRange()
  * populated the structure with success (REDIS_OK returned). */
 void zslFreeLexRange(zlexrangespec *spec) {
@@ -545,18 +476,6 @@ int compareStringObjectsForLexRange(robj *a, robj *b) {
     if (a == shared.minstring || b == shared.maxstring) return -1;
     if (a == shared.maxstring || b == shared.minstring) return 1;
     return compareStringObjects(a,b);
-}
-
-static int zslLexValueGteMin(robj *value, zlexrangespec *spec) {
-    return spec->minex ?
-        (compareStringObjectsForLexRange(value,spec->min) > 0) :
-        (compareStringObjectsForLexRange(value,spec->min) >= 0);
-}
-
-static int zslLexValueLteMax(robj *value, zlexrangespec *spec) {
-    return spec->maxex ?
-        (compareStringObjectsForLexRange(value,spec->max) < 0) :
-        (compareStringObjectsForLexRange(value,spec->max) <= 0);
 }
 
 /* Returns if there is a part of the zset is in the lex range. */
@@ -819,20 +738,6 @@ unsigned char *zzlLastInRange(unsigned char *zl, zrangespec *range) {
     }
 
     return NULL;
-}
-
-static int zzlLexValueGteMin(unsigned char *p, zlexrangespec *spec) {
-    robj *value = ziplistGetObject(p);
-    int res = zslLexValueGteMin(value,spec);
-    decrRefCount(value);
-    return res;
-}
-
-static int zzlLexValueLteMax(unsigned char *p, zlexrangespec *spec) {
-    robj *value = ziplistGetObject(p);
-    int res = zslLexValueLteMax(value,spec);
-    decrRefCount(value);
-    return res;
 }
 
 /* Returns if there is a part of the zset is in range. Should only be used

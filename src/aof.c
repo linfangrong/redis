@@ -996,6 +996,97 @@ int rewriteHashObject(rio *r, robj *key, robj *o) {
     return 1;
 }
 
+/* Emit the commands needed to rebuild a finite sorted set object.
+ * The function returns 0 on error, 1 on success. */
+int rewriteFiniteSortedSetObject(rio *r, robj *key, robj *o) {
+    long long count = 0, items = xsetLength(o);
+
+    if (o->encoding == REDIS_ENCODING_ZIPLIST) {
+        xsetZiplist *xsz = o->ptr;
+        size_t finity = xsz->finity;
+        int pruning = xsz->pruning;
+        unsigned char *zl = xsz->zl;
+        unsigned char *eptr, *sptr;
+        unsigned char *vstr;
+        unsigned int vlen;
+        long long vll;
+        double score;
+
+        eptr = ziplistIndex(zl, 0);
+        redisAssert(eptr != NULL);
+        sptr = ziplistNext(zl, eptr);
+        redisAssert(sptr != NULL);
+
+        while (eptr != NULL) {
+            redisAssert(ziplistGet(eptr, &vstr, &vlen, &vll));
+            score = zzlGetScore(sptr);
+
+            if (count == 0) {
+                int cmd_items = (items > REDIS_AOF_REWRITE_ITEMS_PER_CMD) ?
+                    REDIS_AOF_REWRITE_ITEMS_PER_CMD : items;
+
+                if (rioWriteBulkCount(r, '*', 6+cmd_items*2) == 0) return 0;
+                if (rioWriteBulkString(r, "XADD", 4) == 0) return 0;
+                if (rioWriteBulkObject(r, key) == 0) return 0;
+                if (rioWriteBulkString(r, "FINITY", 6) == 0) return 0;
+                if (rioWriteBulkLongLong(r, finity) == 0) return 0;
+                if (rioWriteBulkString(r, "PRUNING", 7) == 0) return 0;
+                if (pruning) {
+                    if (rioWriteBulkString(r, "maxscore", 8) == 0) return 0;
+                } else {
+                    if (rioWriteBulkString(r, "minscore", 8) == 0) return 0;
+                }
+            }
+            if (rioWriteBulkDouble(r, score) == 0) return 0;
+            if (vstr != NULL) {
+                if (rioWriteBulkString(r, (char*)vstr, vlen) == 0) return 0;
+            } else {
+                if (rioWriteBulkLongLong(r, vll) == 0) return 0;
+            }
+            zzlNext(zl, &eptr, &sptr);
+            if (++count == REDIS_AOF_REWRITE_ITEMS_PER_CMD) count = 0;
+            items--;
+        }
+    } else if (o->encoding == REDIS_ENCODING_SKIPLIST) {
+        xset *xs = o->ptr;
+        size_t finity = xs->finity;
+        int pruning = xs->pruning;
+        zset *zs = xs->zset;
+        dictIterator *di = dictGetIterator(zs->dict);
+        dictEntry *de;
+
+        while ((de = dictNext(di)) != NULL) {
+            robj *eleobj = dictGetKey(de);
+            double *score = dictGetVal(de);
+
+            if (count == 0) {
+                int cmd_items = (items > REDIS_AOF_REWRITE_ITEMS_PER_CMD) ?
+                    REDIS_AOF_REWRITE_ITEMS_PER_CMD : items;
+
+                if (rioWriteBulkCount(r, '*', 6+cmd_items*2) == 0) return 0;
+                if (rioWriteBulkString(r, "XADD", 4) == 0) return 0;
+                if (rioWriteBulkObject(r,key) == 0) return 0;
+                if (rioWriteBulkString(r, "FINITY", 6) == 0) return 0;
+                if (rioWriteBulkLongLong(r, finity) == 0) return 0;
+                if (rioWriteBulkString(r, "PRUNING", 7) == 0) return 0;
+                if (pruning) {
+                    if (rioWriteBulkString(r, "maxscore", 8) == 0) return 0;
+                } else {
+                    if (rioWriteBulkString(r, "minscore", 8) == 0) return 0;
+                }
+            }
+            if (rioWriteBulkDouble(r,*score) == 0) return 0;
+            if (rioWriteBulkObject(r,eleobj) == 0) return 0;
+            if (++count == REDIS_AOF_REWRITE_ITEMS_PER_CMD) count = 0;
+            items--;
+        }
+        dictReleaseIterator(di);
+    } else {
+        redisPanic("Unknown finite sorted zset encoding");
+    }
+    return 1;
+}
+
 /* This function is called by the child rewriting the AOF file to read
  * the difference accumulated from the parent into a buffer, that is
  * concatenated at the end of the rewrite. */
@@ -1088,6 +1179,8 @@ int rewriteAppendOnlyFile(char *filename) {
                 if (rewriteSortedSetObject(&aof,&key,o) == 0) goto werr;
             } else if (o->type == REDIS_HASH) {
                 if (rewriteHashObject(&aof,&key,o) == 0) goto werr;
+            } else if (o->type == REDIS_XSET) {
+                if (rewriteFiniteSortedSetObject(&aof, &key, o) == 0) goto werr;
             } else {
                 redisPanic("Unknown object type");
             }

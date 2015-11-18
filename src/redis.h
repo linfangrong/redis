@@ -182,6 +182,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define REDIS_SET 2
 #define REDIS_ZSET 3
 #define REDIS_HASH 4
+#define REDIS_XSET 5
 
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
@@ -340,6 +341,12 @@ typedef long long mstime_t; /* millisecond time type. */
 #define REDIS_SET_MAX_INTSET_ENTRIES 512
 #define REDIS_ZSET_MAX_ZIPLIST_ENTRIES 128
 #define REDIS_ZSET_MAX_ZIPLIST_VALUE 64
+#define REDIS_XSET_MAX_ZIPLIST_ENTRIES 128
+#define REDIS_XSET_MAX_ZIPLIST_VALUE 64
+
+/* Xset defines */
+#define REDIS_DEFAULT_XSET_FINITY 2000
+#define REDIS_DEFAULT_XSET_PRUNING 0
 
 /* HyperLogLog defines */
 #define REDIS_DEFAULT_HLL_SPARSE_MAX_BYTES 3000
@@ -399,7 +406,8 @@ typedef long long mstime_t; /* millisecond time type. */
 #define REDIS_NOTIFY_ZSET (1<<7)        /* z */
 #define REDIS_NOTIFY_EXPIRED (1<<8)     /* x */
 #define REDIS_NOTIFY_EVICTED (1<<9)     /* e */
-#define REDIS_NOTIFY_ALL (REDIS_NOTIFY_GENERIC | REDIS_NOTIFY_STRING | REDIS_NOTIFY_LIST | REDIS_NOTIFY_SET | REDIS_NOTIFY_HASH | REDIS_NOTIFY_ZSET | REDIS_NOTIFY_EXPIRED | REDIS_NOTIFY_EVICTED)      /* A */
+#define REDIS_NOTIFY_XSET (1<<10)       /* X */
+#define REDIS_NOTIFY_ALL (REDIS_NOTIFY_GENERIC | REDIS_NOTIFY_STRING | REDIS_NOTIFY_LIST | REDIS_NOTIFY_SET | REDIS_NOTIFY_HASH | REDIS_NOTIFY_ZSET | REDIS_NOTIFY_EXPIRED | REDIS_NOTIFY_EVICTED | REDIS_NOTIFY_XSET)      /* A */
 
 /* Get the first bind addr or NULL */
 #define REDIS_BIND_ADDR (server.bindaddr_count ? server.bindaddr[0] : NULL)
@@ -619,6 +627,19 @@ typedef struct zset {
     dict *dict;
     zskiplist *zsl;
 } zset;
+
+/* finite sorted set */
+typedef struct xsetZiplist {
+    size_t finity;
+    int pruning;
+    unsigned char *zl;
+} xsetZiplist;
+
+typedef struct xset {
+    size_t finity;
+    int pruning;
+    zset *zset;
+} xset;
 
 typedef struct clientBufferLimitsConfig {
     unsigned long long hard_limit_bytes;
@@ -883,6 +904,10 @@ struct redisServer {
     size_t set_max_intset_entries;
     size_t zset_max_ziplist_entries;
     size_t zset_max_ziplist_value;
+    size_t xset_max_ziplist_entries;
+    size_t xset_max_ziplist_value;
+    size_t xset_finity;
+    int xset_pruning;
     size_t hll_sparse_max_bytes;
     time_t unixtime;        /* Unix time sampled every cron cycle. */
     long long mstime;       /* Like 'unixtime' but with milliseconds resolution. */
@@ -1132,6 +1157,7 @@ void freeListObject(robj *o);
 void freeSetObject(robj *o);
 void freeZsetObject(robj *o);
 void freeHashObject(robj *o);
+void freeXsetObject(robj *o);
 robj *createObject(int type, void *ptr);
 robj *createStringObject(char *ptr, size_t len);
 robj *createRawStringObject(char *ptr, size_t len);
@@ -1150,6 +1176,8 @@ robj *createIntsetObject(void);
 robj *createHashObject(void);
 robj *createZsetObject(void);
 robj *createZsetZiplistObject(void);
+robj *createXsetObject(size_t finity, int pruning);
+robj *createXsetZiplistObject(size_t finity, int pruning);
 int getLongFromObjectOrReply(redisClient *c, robj *o, long *target, const char *msg);
 int checkType(redisClient *c, robj *o, int type);
 int getLongLongFromObjectOrReply(redisClient *c, robj *o, long long *target, const char *msg);
@@ -1240,6 +1268,8 @@ void zzlPrev(unsigned char *zl, unsigned char **eptr, unsigned char **sptr);
 unsigned int zsetLength(robj *zobj);
 void zsetConvert(robj *zobj, int encoding);
 unsigned long zslGetRank(zskiplist *zsl, double score, robj *o);
+unsigned int xsetLength(robj *zobj);
+void xsetConvert(robj *zobj, int encoding);
 
 /* Core functions */
 int freeMemoryIfNeeded(void);
@@ -1492,6 +1522,28 @@ void zremCommand(redisClient *c);
 void zscoreCommand(redisClient *c);
 void zremrangebyscoreCommand(redisClient *c);
 void zremrangebylexCommand(redisClient *c);
+void xaddCommand(redisClient *c);
+void xincrbyCommand(redisClient *c);
+void xrangeCommand(redisClient *c);
+void xrevrangeCommand(redisClient *c);
+void xcardCommand(redisClient *c);
+void xremCommand(redisClient *c);
+void xscoreCommand(redisClient *c);
+void xsetoptionsCommand(redisClient *c);
+void xgetfinityCommand(redisClient *c);
+void xgetpruningCommand(redisClient *c);
+void xrangebyscoreCommand(redisClient *c);
+void xrevrangebyscoreCommand(redisClient *c);
+void xrangebylexCommand(redisClient *c);
+void xrevrangebylexCommand(redisClient *c);
+void xrankCommand(redisClient *c);
+void xrevrankCommand(redisClient *c);
+void xcountCommand(redisClient *c);
+void xlexcountCommand(redisClient *c);
+void xremrangebyscoreCommand(redisClient *c);
+void xremrangebyrankCommand(redisClient *c);
+void xremrangebylexCommand(redisClient *c);
+void xscanCommand(redisClient *c);
 void multiCommand(redisClient *c);
 void execCommand(redisClient *c);
 void discardCommand(redisClient *c);

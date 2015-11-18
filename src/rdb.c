@@ -460,6 +460,13 @@ int rdbSaveObjectType(rio *rdb, robj *o) {
             return rdbSaveType(rdb,REDIS_RDB_TYPE_HASH);
         else
             redisPanic("Unknown hash encoding");
+    case REDIS_XSET:
+        if (o->encoding == REDIS_ENCODING_ZIPLIST)
+            return rdbSaveType(rdb, REDIS_RDB_TYPE_XSET_ZIPLIST);
+        else if (o->encoding == REDIS_ENCODING_SKIPLIST)
+            return rdbSaveType(rdb, REDIS_RDB_TYPE_XSET);
+        else
+            redisPanic("Unknown finite sorted set encoding");
     default:
         redisPanic("Unknown object type");
     }
@@ -587,6 +594,44 @@ int rdbSaveObject(rio *rdb, robj *o) {
 
         } else {
             redisPanic("Unknown hash encoding");
+        }
+    } else if (o->type == REDIS_XSET) {
+        /* Save a finite sorted set value */
+        if (o->encoding == REDIS_ENCODING_ZIPLIST) {
+            xsetZiplist *xsz = o->ptr;
+            size_t l = ziplistBlobLen(xsz->zl);
+
+            if ((n = rdbSaveLen(rdb, xsz->finity)) == -1) return -1;
+            nwritten += n;
+            if ((n = rdbSaveLen(rdb, xsz->pruning)) == -1) return -1;
+            nwritten += n;
+            if ((n = rdbSaveRawString(rdb, xsz->zl, l)) == -1) return -1;
+            nwritten += n;
+        } else if (o->encoding == REDIS_ENCODING_SKIPLIST) {
+            xset *xs = o->ptr;
+            zset *zs = xs->zset;
+            dictIterator *di = dictGetIterator(zs->dict);
+            dictEntry *de;
+
+            if ((n = rdbSaveLen(rdb, xs->finity)) == -1) return -1;
+            nwritten += n;
+            if ((n = rdbSaveLen(rdb, xs->pruning)) == -1) return -1;
+            nwritten += n;
+            if ((n = rdbSaveLen(rdb, dictSize(zs->dict))) == -1) return -1;
+            nwritten += n;
+
+            while ((de = dictNext(di)) != NULL) {
+                robj *eleobj = dictGetKey(de);
+                double *score = dictGetVal(de);
+
+                if ((n = rdbSaveStringObject(rdb, eleobj)) == -1) return -1;
+                nwritten += n;
+                if ((n = rdbSaveDoubleValue(rdb, *score)) == -1) return -1;
+                nwritten += n;
+            }
+            dictReleaseIterator(di);
+        } else {
+            redisPanic("Unknown finite sorted set encoding");
         }
 
     } else {
@@ -994,6 +1039,65 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
 
         /* All pairs should be read by now */
         redisAssert(len == 0);
+
+    } else if (rdbtype == REDIS_RDB_TYPE_XSET) {
+        /* Read list/set value */
+        size_t finity;
+        size_t pruning;
+        size_t xsetlen;
+        size_t maxelelen = 0;
+        xset *xs;
+        zset *zs;
+
+        if ((finity = rdbLoadLen(rdb, NULL)) == REDIS_RDB_LENERR) return NULL;
+        if ((pruning = rdbLoadLen(rdb, NULL)) == REDIS_RDB_LENERR) return NULL;
+        if ((xsetlen = rdbLoadLen(rdb, NULL)) == REDIS_RDB_LENERR) return NULL;
+        o = createXsetObject(finity, pruning);
+        xs = o->ptr;
+        zs = xs->zset;
+
+        /* Load every single element of the list/set */
+        while (xsetlen--) {
+            robj *ele;
+            double score;
+            zskiplistNode *znode;
+
+            if ((ele = rdbLoadEncodedStringObject(rdb)) == NULL) return NULL;
+            ele = tryObjectEncoding(ele);
+            if (rdbLoadDoubleValue(rdb, &score) == -1) return NULL;
+
+            /* Don't care about integer-encoded strings. */
+            if (ele->encoding == REDIS_ENCODING_RAW &&
+                sdslen(ele->ptr) > maxelelen)
+                    maxelelen = sdslen(ele->ptr);
+
+            znode = zslInsert(zs->zsl, score, ele);
+            dictAdd(zs->dict, ele, &znode->score);
+            incrRefCount(ele); /* added to skiplist */
+        }
+
+        /* Convert *after* loading, since sorted sets are not stored ordered. */
+        if (xsetLength(o) <= server.xset_max_ziplist_entries &&
+            maxelelen <= server.xset_max_ziplist_value)
+                xsetConvert(o, REDIS_ENCODING_ZIPLIST);
+
+    } else if (rdbtype == REDIS_RDB_TYPE_XSET_ZIPLIST) {
+        size_t finity;
+        size_t pruning;
+        xsetZiplist *xsz;
+
+        if ((finity = rdbLoadLen(rdb, NULL)) == REDIS_RDB_LENERR) return NULL;
+        if ((pruning = rdbLoadLen(rdb, NULL)) == REDIS_RDB_LENERR) return NULL;
+        robj *aux = rdbLoadStringObject(rdb);
+        if (aux == NULL) return NULL;
+        o = createXsetZiplistObject(finity, pruning);
+        xsz = o->ptr;
+        xsz->zl = zmalloc(sdslen(aux->ptr));
+        memcpy(xsz->zl, aux->ptr, sdslen(aux->ptr));
+        decrRefCount(aux);
+
+        if (xsetLength(o) > server.xset_max_ziplist_entries)
+            xsetConvert(o, REDIS_ENCODING_SKIPLIST);
 
     } else if (rdbtype == REDIS_RDB_TYPE_HASH_ZIPMAP  ||
                rdbtype == REDIS_RDB_TYPE_LIST_ZIPLIST ||

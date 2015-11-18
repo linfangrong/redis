@@ -406,6 +406,14 @@ void loadServerConfigFromString(char *config) {
             server.zset_max_ziplist_entries = memtoll(argv[1], NULL);
         } else if (!strcasecmp(argv[0],"zset-max-ziplist-value") && argc == 2) {
             server.zset_max_ziplist_value = memtoll(argv[1], NULL);
+        } else if (!strcasecmp(argv[0], "xset-max-ziplist-entries") && argc == 2) {
+            server.xset_max_ziplist_entries = memtoll(argv[1], NULL);
+        } else if (!strcasecmp(argv[0], "xset-max-ziplist-value") && argc == 2) {
+            server.xset_max_ziplist_value = memtoll(argv[1], NULL);
+        } else if (!strcasecmp(argv[0], "xset-finity") && argc == 2) {
+            server.xset_finity = memtoll(argv[1], NULL);
+        } else if (!strcasecmp(argv[0], "xset-pruning") && argc == 2) {
+            server.xset_pruning = memtoll(argv[1], NULL);
         } else if (!strcasecmp(argv[0],"hll-sparse-max-bytes") && argc == 2) {
             server.hll_sparse_max_bytes = memtoll(argv[1], NULL);
         } else if (!strcasecmp(argv[0],"rename-command") && argc == 3) {
@@ -816,6 +824,18 @@ void configSetCommand(redisClient *c) {
     } else if (!strcasecmp(c->argv[2]->ptr,"zset-max-ziplist-value")) {
         if (getLongLongFromObject(o,&ll) == REDIS_ERR || ll < 0) goto badfmt;
         server.zset_max_ziplist_value = ll;
+    } else if (!strcasecmp(c->argv[2]->ptr, "xset-max-ziplist-entries")) {
+        if (getLongLongFromObject(o, &ll) == REDIS_ERR || ll < 0) goto badfmt;
+        server.xset_max_ziplist_entries = ll;
+    } else if (!strcasecmp(c->argv[2]->ptr, "xset-max-ziplist-value")) {
+        if (getLongLongFromObject(o, &ll) == REDIS_ERR || ll < 0) goto badfmt;
+        server.xset_max_ziplist_value = ll;
+    } else if (!strcasecmp(c->argv[2]->ptr, "xset-finity")) {
+        if (getLongLongFromObject(o, &ll) == REDIS_ERR || ll < 0) goto badfmt;
+        server.xset_finity = ll;
+    } else if (!strcasecmp(c->argv[2]->ptr, "xset-pruning")) {
+        if (getLongLongFromObject(o, &ll) == REDIS_ERR || ll < 0) goto badfmt;
+        server.xset_pruning = ll;
     } else if (!strcasecmp(c->argv[2]->ptr,"hll-sparse-max-bytes")) {
         if (getLongLongFromObject(o,&ll) == REDIS_ERR || ll < 0) goto badfmt;
         server.hll_sparse_max_bytes = ll;
@@ -1049,6 +1069,14 @@ void configGetCommand(redisClient *c) {
             server.zset_max_ziplist_entries);
     config_get_numerical_field("zset-max-ziplist-value",
             server.zset_max_ziplist_value);
+    config_get_numerical_field("xset-max-ziplist-entries",
+            server.xset_max_ziplist_entries);
+    config_get_numerical_field("xset-max-ziplist-value",
+            server.xset_max_ziplist_value);
+    config_get_numerical_field("xset-finity",
+            server.xset_finity);
+    config_get_numerical_field("xset-pruning",
+            server.xset_pruning);
     config_get_numerical_field("hll-sparse-max-bytes",
             server.hll_sparse_max_bytes);
     config_get_numerical_field("lua-time-limit",server.lua_time_limit);
@@ -1865,6 +1893,10 @@ int rewriteConfig(char *path) {
     rewriteConfigNumericalOption(state,"set-max-intset-entries",server.set_max_intset_entries,REDIS_SET_MAX_INTSET_ENTRIES);
     rewriteConfigNumericalOption(state,"zset-max-ziplist-entries",server.zset_max_ziplist_entries,REDIS_ZSET_MAX_ZIPLIST_ENTRIES);
     rewriteConfigNumericalOption(state,"zset-max-ziplist-value",server.zset_max_ziplist_value,REDIS_ZSET_MAX_ZIPLIST_VALUE);
+    rewriteConfigNumericalOption(state,"xset-max-ziplist-entries",server.xset_max_ziplist_entries,REDIS_XSET_MAX_ZIPLIST_ENTRIES);
+    rewriteConfigNumericalOption(state,"xset-max-ziplist-value",server.xset_max_ziplist_value,REDIS_XSET_MAX_ZIPLIST_VALUE);
+    rewriteConfigNumericalOption(state,"xset-finity",server.xset_finity,REDIS_DEFAULT_XSET_FINITY);
+    rewriteConfigNumericalOption(state,"xset-pruning",server.xset_pruning,REDIS_DEFAULT_XSET_PRUNING);
     rewriteConfigNumericalOption(state,"hll-sparse-max-bytes",server.hll_sparse_max_bytes,REDIS_DEFAULT_HLL_SPARSE_MAX_BYTES);
     rewriteConfigYesNoOption(state,"activerehashing",server.activerehashing,REDIS_DEFAULT_ACTIVE_REHASHING);
     rewriteConfigClientoutputbufferlimitOption(state);

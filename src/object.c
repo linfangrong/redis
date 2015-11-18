@@ -234,6 +234,34 @@ robj *createZsetZiplistObject(void) {
     return o;
 }
 
+robj *createXsetObject(size_t finity, int pruning) {
+    robj *o;
+    zset *zs = zmalloc(sizeof(*zs));
+    zs->dict = dictCreate(&zsetDictType, NULL);
+    zs->zsl = zslCreate();
+
+    xset *xs = zmalloc(sizeof(*xs));
+    xs->finity = finity;
+    xs->pruning = pruning;
+    xs->zset = zs;
+
+    o = createObject(REDIS_XSET, xs);
+    o->encoding = REDIS_ENCODING_SKIPLIST;
+    return o;
+}
+
+robj *createXsetZiplistObject(size_t finity, int pruning) {
+    robj *o;
+    xsetZiplist *xsz = zmalloc(sizeof(*xsz));
+    xsz->finity = finity;
+    xsz->pruning = pruning;
+    xsz->zl = ziplistNew();
+
+    o = createObject(REDIS_XSET, xsz);
+    o->encoding = REDIS_ENCODING_ZIPLIST;
+    return o;
+}
+
 void freeStringObject(robj *o) {
     if (o->encoding == REDIS_ENCODING_RAW) {
         sdsfree(o->ptr);
@@ -297,6 +325,27 @@ void freeHashObject(robj *o) {
     }
 }
 
+void freeXsetObject(robj *o) {
+    xset *xs;
+    xsetZiplist *xsz;
+    switch (o->encoding) {
+    case REDIS_ENCODING_SKIPLIST:
+        xs = o->ptr;
+        dictRelease(xs->zset->dict);
+        zslFree(xs->zset->zsl);
+        zfree(xs->zset);
+        zfree(xs);
+        break;
+    case REDIS_ENCODING_ZIPLIST:
+        xsz = o->ptr;
+        zfree(xsz->zl);
+        zfree(xsz);
+        break;
+    default:
+        redisPanic("Unknown finite sorted set encoding");
+    }
+}
+
 void incrRefCount(robj *o) {
     o->refcount++;
 }
@@ -310,6 +359,7 @@ void decrRefCount(robj *o) {
         case REDIS_SET: freeSetObject(o); break;
         case REDIS_ZSET: freeZsetObject(o); break;
         case REDIS_HASH: freeHashObject(o); break;
+        case REDIS_XSET: freeXsetObject(o); break;
         default: redisPanic("Unknown object type"); break;
         }
         zfree(o);

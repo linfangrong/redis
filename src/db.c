@@ -436,7 +436,7 @@ void scanGenericCommand(redisClient *c, robj *o, unsigned long cursor) {
     /* Object must be NULL (to iterate keys names), or the type of the object
      * must be Set, Sorted Set, or Hash. */
     redisAssert(o == NULL || o->type == REDIS_SET || o->type == REDIS_HASH ||
-                o->type == REDIS_ZSET);
+                o->type == REDIS_ZSET || o->type == REDIS_XSET);
 
     /* Set i to the first option argument. The previous one is the cursor. */
     i = (o == NULL) ? 2 : 3; /* Skip the key argument if needed. */
@@ -493,6 +493,11 @@ void scanGenericCommand(redisClient *c, robj *o, unsigned long cursor) {
         zset *zs = o->ptr;
         ht = zs->dict;
         count *= 2; /* We return key / value for this type. */
+    } else if (o->type == REDIS_XSET && o->encoding == REDIS_ENCODING_SKIPLIST) {
+        xset *xs = o->ptr;
+        zset *zs = xs->zset;
+        ht = zs->dict;
+        count *= 2; /* We return key / value for this type. */
     }
 
     if (ht) {
@@ -520,8 +525,14 @@ void scanGenericCommand(redisClient *c, robj *o, unsigned long cursor) {
         while(intsetGet(o->ptr,pos++,&ll))
             listAddNodeTail(keys,createStringObjectFromLongLong(ll));
         cursor = 0;
-    } else if (o->type == REDIS_HASH || o->type == REDIS_ZSET) {
-        unsigned char *p = ziplistIndex(o->ptr,0);
+    } else if (o->type == REDIS_HASH || o->type == REDIS_ZSET || o->type == REDIS_XSET) {
+        unsigned char *zl;
+        if (o->type == REDIS_XSET) {
+            zl = ((xsetZiplist*)o->ptr)->zl;
+        } else {
+            zl = o->ptr;
+        }
+        unsigned char *p = ziplistIndex(zl,0);
         unsigned char *vstr;
         unsigned int vlen;
         long long vll;
@@ -531,7 +542,7 @@ void scanGenericCommand(redisClient *c, robj *o, unsigned long cursor) {
             listAddNodeTail(keys,
                 (vstr != NULL) ? createStringObject((char*)vstr,vlen) :
                                  createStringObjectFromLongLong(vll));
-            p = ziplistNext(o->ptr,p);
+            p = ziplistNext(zl,p);
         }
         cursor = 0;
     } else {
@@ -630,6 +641,7 @@ void typeCommand(redisClient *c) {
         case REDIS_SET: type = "set"; break;
         case REDIS_ZSET: type = "zset"; break;
         case REDIS_HASH: type = "hash"; break;
+        case REDIS_XSET: type = "xset"; break;
         default: type = "unknown"; break;
         }
     }
